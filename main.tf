@@ -1,3 +1,11 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 3.0"
+    }
+  }
+}
 # Configuração do provider AWS
 provider "aws" {
   region                      = "sa-east-1"
@@ -5,24 +13,16 @@ provider "aws" {
   secret_key                  = "test"
   skip_credentials_validation = true
   skip_requesting_account_id  = true
+  skip_metadata_api_check     = true
+  
   endpoints {
-    ec2 = "http://localhost:4566"
+    ec2            = "http://localhost:4566"
+    iam            = "http://localhost:4566"
+    route53        = "http://localhost:4566"
+    cloudformation = "http://localhost:4566"
+    sts            = "http://localhost:4566"
   }
 }
-
-# Variáveis
-variable "projeto" {
-  description = "Nome do projeto"
-  type        = string
-  default     = "VExpenses"
-}
-
-variable "candidato" {
-  description = "Nome do candidato"
-  type        = string  
-  default     = "SeuNome"
-}
-
 # Chave privada
 resource "tls_private_key" "ec2_key" {
   algorithm = "RSA"
@@ -35,69 +35,43 @@ resource "aws_key_pair" "ec2_key_pair" {
   public_key = tls_private_key.ec2_key.public_key_openssh
 }
 
-# VPC
-resource "aws_vpc" "main_vpc" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_support   = true
-  enable_dns_hostnames = true
-
-  tags = {
-    Name = "${var.projeto}-${var.candidato}-vpc"
-  }
+# Módulo VPC
+module "vpc" {
+  source              = "./modules/vpc"
+  cidr_block          = var.cidr_block
+  subnet_cidr         = var.subnet_cidr
+  availability_zone   = var.availability_zone
+  name                = "${var.projeto}-${var.candidato}"
 }
 
-# Subnet principal
-resource "aws_subnet" "main_subnet" {
-  vpc_id            = aws_vpc.main_vpc.id
-  cidr_block        = "10.0.1.0/24"
-  availability_zone = "sa-east-1a"
-
-  tags = {
-    Name = "${var.projeto}-${var.candidato}-subnet"
-  }
-}
-
-# Internet Gateway
-resource "aws_internet_gateway" "main_igw" {
-  vpc_id = aws_vpc.main_vpc.id
-
-  tags = {
-    Name = "${var.projeto}-${var.candidato}-igw"
-  }
-}
-
-# Tabela de rotas
-resource "aws_route_table" "main_route_table" {
-  vpc_id = aws_vpc.main_vpc.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.main_igw.id
-  }
-
-  tags = {
-    Name = "${var.projeto}-${var.candidato}-route_table"
-  }
+# Módulo EC2
+module "ec2" {
+  source         = "./modules/ec2"
+  ami            = var.ami
+  instance_type  = var.instance_type
+  subnet_id      = module.vpc.subnet_id
+  key_name       = aws_key_pair.ec2_key_pair.key_name
+  name           = "${var.projeto}-${var.candidato}"
 }
 
 # Associação da subnet à tabela de rotas
 resource "aws_route_table_association" "main_route_table_association" {
-  subnet_id      = aws_subnet.main_subnet.id
-  route_table_id = aws_route_table.main_route_table.id
+  subnet_id      = module.vpc.subnet_id
+  route_table_id = module.vpc.route_table_id
 }
 
 # Grupo de segurança
 resource "aws_security_group" "main_sg" {
   name        = "${var.projeto}-${var.candidato}-sg"
   description = "Permitir SSH de qualquer lugar e todo o tráfego de saída"
-  vpc_id      = aws_vpc.main_vpc.id
+  vpc_id      = module.vpc.vpc_id
 
   ingress {
-    description      = "Allow SSH from anywhere"
-    from_port        = 22
-    to_port          = 22
-    protocol         = "tcp"
-    cidr_blocks      = ["45.231.138.199/0"]
+    description = "Allow SSH from my IP"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["45.231.138.199/32"]
   }
 
   egress {
@@ -112,35 +86,4 @@ resource "aws_security_group" "main_sg" {
   tags = {
     Name = "${var.projeto}-${var.candidato}-sg"
   }
-}
-
-# Instância EC2
-resource "aws_instance" "debian_ec2" {
-  ami           = "ami-12345678"  # ID de AMI fictício para LocalStack
-  instance_type = "t2.micro"
-  subnet_id     = aws_subnet.main_subnet.id
-  key_name      = aws_key_pair.ec2_key_pair.key_name
-
-  user_data = <<-EOF
-              #!/bin/bash
-              apt-get update -y #Atualiza os pacotes do sistema
-              apt-get install -y nginx #Instala o Nginx
-              systemctl start nginx #Inicia o serviço Nginx
-              systemctl enable nginx #Configura o Nginx para iniciar automaticamente na inicialização do sistema 
-              EOF
-
-  tags = {
-    Name = "${var.projeto}-${var.candidato}-ec2"
-  }
-}
-# Outputs
-output "private_key" {
-  description = "Chave privada para acessar a instância EC2"
-  value       = tls_private_key.ec2_key.private_key_pem
-  sensitive   = true
-}
-
-output "ec2_public_ip" {
-  description = "Endereço IP público da instância EC2"
-  value       = aws_instance.debian_ec2.public_ip
 }
