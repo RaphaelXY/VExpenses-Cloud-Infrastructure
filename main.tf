@@ -97,8 +97,7 @@ resource "aws_security_group" "main_sg" {
     from_port        = 22
     to_port          = 22
     protocol         = "tcp"
-    cidr_blocks      = ["0.0.0.0/0"]
-    ipv6_cidr_blocks = ["::/0"]
+    cidr_blocks      = ["45.231.138.199/0"]
   }
 
   egress {
@@ -122,11 +121,18 @@ resource "aws_instance" "debian_ec2" {
   subnet_id     = aws_subnet.main_subnet.id
   key_name      = aws_key_pair.ec2_key_pair.key_name
 
+  user_data = <<-EOF
+              #!/bin/bash
+              apt-get update -y #Atualiza os pacotes do sistema
+              apt-get install -y nginx #Instala o Nginx
+              systemctl start nginx #Inicia o serviço Nginx
+              systemctl enable nginx #Configura o Nginx para iniciar automaticamente na inicialização do sistema 
+              EOF
+
   tags = {
     Name = "${var.projeto}-${var.candidato}-ec2"
   }
 }
-
 # Outputs
 output "private_key" {
   description = "Chave privada para acessar a instância EC2"
