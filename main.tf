@@ -11,8 +11,6 @@ terraform {
 # Configuração do provider AWS
 provider "aws" {
   region                      = "sa-east-1"  # Região da AWS
-  access_key                  = "test"  # Chave de acesso (para LocalStack)
-  secret_key                  = "test"  # Chave secreta (para LocalStack)
   skip_credentials_validation = true  # Ignorar validação de credenciais
   skip_requesting_account_id  = true  # Ignorar requisição de ID da conta
   skip_metadata_api_check     = true  # Ignorar checagem da API de metadados
@@ -58,12 +56,41 @@ module "ec2" {
   name           = "${var.projeto}-${var.candidato}"  # Nome dos recursos
 }
 
+
+# CloudTrail para logging
+resource "aws_cloudtrail" "main_cloudtrail" {
+  name                          = "${var.projeto}-${var.candidato}-cloudtrail"
+  s3_bucket_name                = aws_s3_bucket.cloudtrail_bucket.id
+  include_global_service_events = true
+
+  event_selector {
+    read_write_type           = "All"
+    include_management_events = true
+  }
+}
+
+# S3 Bucket para CloudTrail
+resource "aws_s3_bucket" "cloudtrail_bucket" {
+  bucket        = "${var.projeto}-${var.candidato}-cloudtrail-logs"
+  force_destroy = true
+}
+
+# CloudWatch Log Group para EC2
+resource "aws_cloudwatch_log_group" "ec2_logs" {
+  name = "/aws/ec2/${var.projeto}-${var.candidato}"
+}
+
 # Associação da subnet à tabela de rotas
 resource "aws_route_table_association" "main_route_table_association" {
   subnet_id      = module.vpc.subnet_id  # ID da Subnet
   route_table_id = module.vpc.route_table_id  # ID da tabela de rotas
 }
-
+# Definindo range de IP
+variable "ssh_allowed_cidr" {
+  description = "CIDR block allowed for SSH access"
+  type        = list(string)
+  default     = ["0.0.0.0/0"] 
+}
 # Grupo de segurança
 resource "aws_security_group" "main_sg" {
   name        = "${var.projeto}-${var.candidato}-sg"  # Nome do grupo de segurança
@@ -71,11 +98,11 @@ resource "aws_security_group" "main_sg" {
   vpc_id      = module.vpc.vpc_id  # ID da VPC onde o grupo será criado
 
   ingress {
-    description = "Allow SSH from my IP"  # Descrição da regra de entrada
+    description = "Allow SSH from allowed CIDR"  # Descrição da regra de entrada
     from_port   = 22  # Porta de entrada
     to_port     = 22  # Porta de saída
     protocol    = "tcp"  # Protocolo (TCP)
-    cidr_blocks = ["45.231.138.199/32"]  # Permitir acesso SSH somente do IP especificado
+    cidr_blocks = var.ssh_allowed_cidr  # Permitir acesso SSH somente do IP especificado
   }
 
   egress {
@@ -86,6 +113,9 @@ resource "aws_security_group" "main_sg" {
     cidr_blocks      = ["0.0.0.0/0"]  # Permitir todo tráfego de saída
     ipv6_cidr_blocks = ["::/0"]  # Permitir todo tráfego de saída IPv6
   }
+
+
+
 
   tags = {
     Name = "${var.projeto}-${var.candidato}-sg"  # Nome do grupo de segurança

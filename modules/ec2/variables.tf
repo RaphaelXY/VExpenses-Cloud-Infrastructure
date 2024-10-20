@@ -23,3 +23,9 @@ variable "name" {
   description = "Nome para a instância EC2"  # Descrição do nome da instância
   type        = string                       # Define o tipo como string
 }
+
+variable "tags" {
+  description = "A map of tags to add to all resources"
+  type        = map(string)
+  default     = {}
+}
